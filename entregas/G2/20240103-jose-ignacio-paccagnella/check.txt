@@ -1,0 +1,8 @@
+Γ£à Nodos en esta laptop: cassandra1
+Γ£à Nodos en estado UN: 3
+Γ£à Nombre del cluster: UFM-G2
+Γ£à Datacenter: dc-g2
+Γ£à Keyspace ventas con 3 copias en dc-g2
+Γ£à ventas.ventas_por_ciudad tiene 75000 filas
+
+Todo en orden.
