@@ -41,9 +41,9 @@
 
 | Nodos caídos | `ONE` | `QUORUM` | `ALL` |
 |---|---|---|---|
-| 0 | | | |
-| 1 | | | |
-| 2 | | | |
+| 0 | ✅ | ✅ | ✅ |
+| 1 | ✅ | ✅ | ❌ |
+| 2 | ✅ | ❌ | ❌ |
 
 ---
 
@@ -51,9 +51,15 @@
 
 **1. ¿Qué línea de la traza muestra que la consulta por ciudad leyó una sola partición, y cuál que la de producto recorrió toda la tabla? ¿Por qué Cassandra rechaza la segunda sin ALLOW FILTERING?**
 
+En la consulta por ciudad, la traza muestra `Executing single-partition query on ventas_por_ciudad` seguida de `Read 2 live rows and 0 tombstone cells`: Cassandra calculó el hash de `'Quetzaltenango'`, fue directo a esa partición y leyó solo las filas de ese día. En la consulta por producto aparece `Submitting range requests on ... ranges` y `Executing seq scan across ... sstables for (min(-9223372036854775808), min(-9223372036854775808)]`, es decir, recorrió el anillo de tokens completo, de punta a punta. Sin `ALLOW FILTERING` Cassandra la rechaza porque `producto` no es parte de la llave primaria: no sabe en qué partición está el dato y tendría que leer todas las particiones de todos los nodos, con un costo que crece con la tabla y no se puede predecir.
+
 **2. ¿Qué lecturas se comportaron como CP y cuáles como AP? ¿Qué nivel usarías para el saldo de una cuenta y cuál para un contador de reproducciones, y por qué?**
 
+Según mi tabla, `ALL` con 1 nodo caído y `QUORUM` con 2 caídos se comportaron como **CP**: con `100.100.99.24` y `100.113.11.13` en `DN`, el coordinador respondió `Cannot achieve consistency level QUORUM ... 'required_replicas': 2, 'alive_replicas': 1` en vez de contestar con una sola copia. `ONE` en todos los casos y `QUORUM` con un solo nodo caído se comportaron como **AP**: con dos nodos en `DN`, `ONE` igual devolvió `count = 2` usando solo mi nodo. Para el saldo de una cuenta usaría `QUORUM` (escribiendo también con `QUORUM`), porque 2 + 2 > 3 garantiza leer la última escritura y es peor mostrar un saldo viejo que fallar. Para un contador de reproducciones usaría `ONE`: importa que siempre responda rápido, y si el número se atrasa unas reproducciones no pasa nada.
+
 **3. ¿Cómo se enteró el nodo apagado de tu venta? ¿Qué pasaría si el nodo estuviera apagado más tiempo que max_hint_window?**
+
+Mi nodo (`cassandra1`, 100.126.2.38) coordinó la escritura con `QUORUM`: la guardó en su copia y en `100.113.11.13`, y para el nodo apagado (`100.100.99.24`, Host ID `4d6b9b77-bba0-4942-b1c4-b1f76a3d507b`, en `DN`) dejó un hint en disco, el archivo `4d6b9b77-bba0-4942-b1c4-b1f76a3d507b-1791076214113-2.hints` en `/var/lib/cassandra/hints`, con el mismo Host ID de la fila `DN`. Cuando ese nodo volvió a `UN`, el registro de mi nodo mostró `Finished hinted handoff of file 4d6b9b77-bba0-4942-b1c4-b1f76a3d507b-1791076214113-2.hints to endpoint /100.100.99.24:7000`: le reenvió la venta y borró el archivo. Si el nodo hubiera estado apagado más que `max_hint_window` (3 horas por defecto), el coordinador deja de guardar hints para él y esas escrituras no le llegarían solas: habría que correr `nodetool repair` para que se ponga al día; mientras tanto, una lectura con `ONE` hacia ese nodo podría devolver datos viejos.
 
 ---
 
